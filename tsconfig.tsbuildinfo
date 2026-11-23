@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/codegen.ts","./src/data.ts","./src/main.tsx","./src/types.ts","./src/components/backendmodal.tsx","./src/components/canvas.tsx","./src/components/codemodal.tsx","./src/components/inspector.tsx"],"version":"5.7.3"}
