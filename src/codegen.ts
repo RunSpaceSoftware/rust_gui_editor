@@ -1,20 +1,33 @@
 import { BACKENDS, getActivePage } from './data'
 import type { BackendId, Project, Widget, WidgetAction } from './types'
 
-const snake = (value: string) => value
-  .replace(/([a-z])([A-Z])/g, '$1_$2')
-  .replace(/[^a-zA-Z0-9]+/g, '_')
-  .replace(/^([0-9])/, '_$1')
-  .replace(/_+/g, '_')
-  .replace(/^_|_$/g, '')
-  .toLowerCase() || 'widget'
-const pascal = (value: string) => snake(value).split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('')
+const snake = (value: string) => {
+  const base = value
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .toLowerCase()
+  if (!base) return 'widget'
+  // Rust identifiers cannot start with a digit, so keep a leading underscore.
+  return /^[0-9]/.test(base) ? `_${base}` : base
+}
+const pascal = (value: string) => {
+  const name = snake(value).split('_').filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('')
+  return /^[0-9]/.test(name) ? `W${name}` : name
+}
 const q = (value: string) => JSON.stringify(value)
 const cssColor = (value: string) => value === 'transparent' ? 'Color32::TRANSPARENT' : `Color32::from_rgb(${hexRgb(value).join(', ')})`
 const hexRgb = (hex: string): [number, number, number] => {
-  const match = hex.replace('#', '').match(/.{2}/g)
-  return match ? [parseInt(match[0], 16), parseInt(match[1], 16), parseInt(match[2], 16)] : [39, 39, 42]
+  let digits = hex.trim().replace('#', '')
+  if (/^[0-9a-f]{3}$/i.test(digits)) digits = digits.split('').map((digit) => digit + digit).join('')
+  if (!/^[0-9a-f]{6}$/i.test(digits)) return [39, 39, 42]
+  return [0, 2, 4].map((offset) => parseInt(digits.slice(offset, offset + 2), 16)) as [number, number, number]
 }
+// Designer coordinates may be fractional; Rust APIs such as GTK and FLTK need integers.
+const int = (value: number) => Math.round(value)
+// Slint colors are bare literals, not strings; anything unsupported falls back to transparent.
+const slintColor = (value: string) => /^#[0-9a-f]{6}$/i.test(value) ? value : 'transparent'
 const actionFor = (widget: Widget, event: 'onClick' | 'onChange') => widget.actions.filter((action) => action.event === event)
 const handler = (widget: Widget) => widget.actions[0]?.handlerName || `handle_${snake(widget.id)}`
 
@@ -63,9 +76,9 @@ function widgetState(project: ScreenProject) {
   return project.widgets.filter((w) => w.type === 'input' || w.type === 'checkbox' || w.type === 'slider')
 }
 
-function defaultFields(project: ScreenProject) {
+function defaultFields(project: ScreenProject, includeVisibility = true) {
   const fields = widgetState(project).map((w) => `        ${snake(w.id)}: ${w.type === 'input' ? 'String::new()' : w.type === 'checkbox' ? 'false' : '50.0'},`)
-  const visibility = project.widgets.map((w) => `        show_${snake(w.id)}: true,`)
+  const visibility = includeVisibility ? project.widgets.map((w) => `        show_${snake(w.id)}: ${w.visible},`) : []
   return [...fields, '        status: String::new(),', ...visibility].join('\n')
 }
 
@@ -182,9 +195,16 @@ function generateIced(project: ScreenProject): string {
 use iced::widget::{button, checkbox, column, container, rule, slider, text, text_input};
 use iced::{Color, Element, Task};
 
-#[derive(Default)]
 struct State {
 ${stateFields(project, false)}
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+${defaultFields(project, false)}
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -229,14 +249,14 @@ function generateSlint(project: ScreenProject): string {
     const common = `        x: ${w.x}px;\n        y: ${w.y}px;\n        width: ${w.width}px;\n        height: ${w.height}px;`
     const actions = w.actions.map((a) => `root.${snake(a.handlerName || `handle_${snake(w.id)}`)}();`).join(' ')
     switch (w.type) {
-      case 'text': return `    Text {\n${common}\n        text: ${q(w.text)};\n        color: ${q(w.color)};\n        font-size: ${w.fontSize}px;\n        font-weight: ${Math.round(w.fontWeight)};\n    }`
+      case 'text': return `    Text {\n${common}\n        text: ${q(w.text)};\n        color: ${slintColor(w.color)};\n        font-size: ${w.fontSize}px;\n        font-weight: ${Math.round(w.fontWeight)};\n    }`
       case 'input': return `    ${w.inputType === 'password' ? 'PasswordInput' : 'LineEdit'} {\n${common}\n        placeholder-text: ${q(w.placeholder)};\n        text <=> root.${snake(w.id)};\n        edited => { ${actions} }\n    }`
       case 'button': return `    Button {\n${common}\n        text: ${q(w.text)};\n        clicked => { ${actions} }\n    }`
       case 'checkbox': return `    CheckBox {\n${common}\n        text: ${q(w.text)};\n        checked <=> root.${snake(w.id)};\n        toggled => { ${actions} }\n    }`
       case 'slider': return `    Slider {\n${common}\n        value <=> root.${snake(w.id)};\n        minimum: 0;\n        maximum: 100;\n        changed => { ${actions} }\n    }`
-      case 'divider': return `    Rectangle {\n${common}\n        background: ${q(w.background)};\n    }`
+      case 'divider': return `    Rectangle {\n${common}\n        background: ${slintColor(w.background)};\n    }`
       case 'image': return `    Rectangle {\n${common}\n        background: #ececf1;\n        border-radius: ${w.borderRadius}px;\n        Text { text: "Image"; color: #8b8b94; }\n    }`
-      case 'container': return `    Rectangle {\n${common}\n        background: ${q(w.background)};\n        border-radius: ${w.borderRadius}px;\n    }`
+      case 'container': return `    Rectangle {\n${common}\n        background: ${slintColor(w.background)};\n        border-radius: ${w.borderRadius}px;\n    }`
     }
   }).join('\n\n')
   return `// Generated by Rustform Studio — Slint
@@ -247,7 +267,7 @@ export component ${pascal(project.screenName)}Window inherits Window {
     title: ${q(project.screenName)};
     preferred-width: ${project.width}px;
     preferred-height: ${project.height}px;
-    background: ${q(project.background)};
+    background: ${slintColor(project.background)};
 ${fields}
 ${callbacks.map((name) => `    callback ${snake(name)}();`).join('\n') || '    // Add an interaction to a widget to generate callbacks.'}
 
@@ -284,11 +304,11 @@ function generateGtk(project: ScreenProject): string {
       case 'container': return `    let ${id} = Box::new(gtk::Orientation::Vertical, 0);`
     }
   }).join('\n')
-  const placement = project.widgets.map((w) => `    ${snake(w.id)}.set_size_request(${w.width}, ${w.height});\n    fixed.put(&${snake(w.id)}, ${w.x}.0, ${w.y}.0);`).join('\n')
+  const placement = project.widgets.map((w) => `    ${snake(w.id)}.set_size_request(${int(w.width)}, ${int(w.height)});\n    fixed.put(&${snake(w.id)}, ${int(w.x)}.0, ${int(w.y)}.0);`).join('\n')
   const actions = project.widgets.flatMap((w) => w.actions.map((a) => {
     const id = snake(w.id)
     const code = gtkAction(a).replaceAll('\n', '\n        ')
-    return a.event === 'onClick'
+    return a.event === 'onClick' && w.type === 'button'
       ? `    ${id}.connect_clicked(move |_| {\n        ${code}\n    });`
       : w.type === 'checkbox' ? `    ${id}.connect_toggled(move |_| {\n        ${code}\n    });` : w.type === 'slider' ? `    ${id}.connect_value_changed(move |_| {\n        ${code}\n    });` : `    ${id}.connect_changed(move |_| {\n        ${code}\n    });`
   })).join('\n')
@@ -306,8 +326,8 @@ fn build_ui(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title(${q(project.screenName)})
-        .default_width(${project.width})
-        .default_height(${project.height})
+        .default_width(${int(project.width)})
+        .default_height(${int(project.height)})
         .build();
     let fixed = Fixed::new();
 ${setup}
@@ -426,10 +446,10 @@ function fltkAction(action: WidgetAction): string {
 function generateFltk(project: ScreenProject): string {
   const setup = project.widgets.map((w) => {
     const id = snake(w.id)
-    const args = `${w.x}, ${w.y}, ${w.width}, ${w.height}`
+    const args = `${int(w.x)}, ${int(w.y)}, ${int(w.width)}, ${int(w.height)}`
     let code = ''
     switch (w.type) {
-      case 'text': code = `let mut ${id} = Frame::new(${args}, None);\n    ${id}.set_label(${q(w.text)});\n    ${id}.set_label_size(${w.fontSize});`; break
+      case 'text': code = `let mut ${id} = Frame::new(${args}, None);\n    ${id}.set_label(${q(w.text)});\n    ${id}.set_label_size(${int(w.fontSize)});`; break
       case 'input': code = `let mut ${id} = ${w.inputType === 'password' ? 'SecretInput' : 'Input'}::new(${args}, None);`; break
       case 'button': code = `let mut ${id} = Button::new(${args}, ${q(w.text)});`; break
       case 'checkbox': code = `let mut ${id} = CheckButton::new(${args}, ${q(w.text)});`; break
@@ -450,7 +470,7 @@ use fltk::{app, button::{Button, CheckButton}, frame::{Frame, FrameType}, input:
 
 fn main() {
     let app = app::App::default();
-    let mut window = Window::new(100, 100, ${project.width}, ${project.height}, ${q(project.screenName)});
+    let mut window = Window::new(100, 100, ${int(project.width)}, ${int(project.height)}, ${q(project.screenName)});
 ${setup}
     window.end();
     window.show();

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Image as ImageIcon, Lock, MousePointer2 } from 'lucide-react'
 import type { Page, Widget, WidgetAction, WidgetType } from '../types'
 
@@ -34,6 +34,11 @@ export default function Canvas({ page, selectedId, zoom, preview, onSelect, onMo
   const [previewValues, setPreviewValues] = useState<Record<string, string | boolean>>({})
   const [hidden, setHidden] = useState<Set<string>>(new Set())
   const [guides, setGuides] = useState({ vertical: false, horizontal: false })
+  // Preview-only state (hidden widgets, typed values) must not leak into design mode or other pages.
+  useEffect(() => {
+    setHidden(new Set())
+    setPreviewValues({})
+  }, [preview, page.id])
   const scale = zoom / 100
 
   const runActions = (widget: Widget, event: 'onClick' | 'onChange') => {
@@ -114,8 +119,9 @@ export default function Canvas({ page, selectedId, zoom, preview, onSelect, onMo
     if (drag.corner.includes('n')) { y = drag.originY + dy; height = drag.originHeight - dy }
     if (x < 0) { width += x; x = 0 }
     if (y < 0) { height += y; y = 0 }
-    width = Math.max(8, width)
-    height = Math.max(8, height)
+    // Keep the opposite edge fixed when the minimum size clamps a west/north resize.
+    if (width < 8) { if (drag.corner.includes('w')) x += width - 8; width = 8 }
+    if (height < 8) { if (drag.corner.includes('n')) y += height - 8; height = 8 }
     onResize(drag.id, Math.round(x), Math.round(y), Math.round(width), Math.round(height))
   }
 

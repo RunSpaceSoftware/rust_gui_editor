@@ -132,7 +132,7 @@ function ActionEditor({ action, widget, page, onUpdate, onRemove }: { action: Wi
   const targets = page.widgets.filter((target) => action.kind === 'setText' ? target.type === 'input' : target.id !== widget.id)
   return <div className="action-card">
     <div className="action-card-heading"><span><Zap size={12} />Interaction</span><button className="icon-button subtle" onClick={onRemove} title="Delete interaction"><Trash2 size={13} /></button></div>
-    <label className="field-label">When<span className="select-wrap"><select value={action.event} onChange={(event) => onUpdate({ event: event.target.value as ActionEvent })}>{widget.type === 'button' ? <option value="onClick">Clicked</option> : <option value="onChange">Value changed</option>}{widget.type !== 'button' && <option value="onClick">Clicked</option>}</select><ChevronDown size={12} /></span></label>
+    <label className="field-label">When<span className="select-wrap"><select value={action.event} onChange={(event) => onUpdate({ event: event.target.value as ActionEvent })}>{widget.type === 'button' ? <option value="onClick">Clicked</option> : <option value="onChange">Value changed</option>}</select><ChevronDown size={12} /></span></label>
     <label className="field-label">Do this<span className="select-wrap"><select value={action.kind} onChange={(event) => onUpdate({ kind: event.target.value as ActionKind, value: '' })}>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><ChevronDown size={12} /></span></label>
     {(action.kind === 'setText' || action.kind === 'toggle') && <label className="field-label">Target<span className="select-wrap"><select value={action.targetId || ''} onChange={(event) => onUpdate({ targetId: event.target.value })}><option value="">Choose widget…</option>{targets.map((target) => <option value={target.id} key={target.id}>{target.name}</option>)}</select><ChevronDown size={12} /></span></label>}
     {(action.kind === 'message' || action.kind === 'navigate' || action.kind === 'setText') && <label className="field-label">{action.kind === 'message' ? 'Message' : action.kind === 'navigate' ? 'Screen or route' : 'New value'}<input value={action.value} onChange={(event) => onUpdate({ value: event.target.value })} placeholder={action.kind === 'navigate' ? '/dashboard' : 'Enter a value…'} /></label>}
@@ -145,7 +145,13 @@ function InspectorSection({ title, children }: { title: string; children: React.
 }
 
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
-  return <label className="number-field"><span>{label}</span><input type="number" value={Math.round(value)} onChange={(event) => onChange(Number(event.target.value))} /></label>
+  // Keep the typed text locally so a field can be cleared before typing a new number.
+  const [draft, setDraft] = useState<string | null>(null)
+  return <label className="number-field"><span>{label}</span><input type="number" value={draft ?? Math.round(value)} onChange={(event) => {
+    const text = event.target.value
+    setDraft(text)
+    if (text.trim() !== '' && Number.isFinite(Number(text))) onChange(Number(text))
+  }} onBlur={() => setDraft(null)} /></label>
 }
 
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

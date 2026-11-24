@@ -15,7 +15,7 @@ export default function CodeModal({ project, onClose }: { project: Project; onCl
     ? `gtk = { version = "${backend.version}", package = "gtk4" }`
     : backend.id === 'dioxus' ? `dioxus = { version = "${backend.version}", features = ["desktop"] }`
     : `${backend.crate} = "${backend.version}"`
-  const cargo = `[package]\nname = "${project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'rustform-app'}"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\n${dependency}${backend.id === 'slint' ? '\nslint = "1.9"' : ''}\n`
+  const cargo = `[package]\nname = "${project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'rustform-app'}"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\n${dependency}\n`
   const content = tab === 'source' ? code : cargo
   const filename = tab === 'source' ? sourceFilename : 'Cargo.toml'
 
@@ -30,7 +30,8 @@ export default function CodeModal({ project, onClose }: { project: Project; onCl
     anchor.href = url
     anchor.download = filename
     anchor.click()
-    URL.revokeObjectURL(url)
+    // Defer revocation so the browser has time to start the download.
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>

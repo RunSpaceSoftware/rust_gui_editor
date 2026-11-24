@@ -39,8 +39,8 @@ function loadProject(): Project {
         : raw.pages[0].id
       return {
         name: raw.name || 'Untitled project',
-        backend: raw.backend || 'slint',
-        pages: raw.pages,
+        backend: BACKENDS.find((item) => item.id === raw.backend)?.id ?? 'slint',
+        pages: raw.pages.map((page) => ({ ...page, widgets: Array.isArray(page.widgets) ? page.widgets : [] })),
         activePageId,
       }
     }
@@ -53,7 +53,7 @@ function loadProject(): Project {
       })
       return {
         name: raw.name || 'Untitled project',
-        backend: raw.backend || 'slint',
+        backend: BACKENDS.find((item) => item.id === raw.backend)?.id ?? 'slint',
         pages: [page],
         activePageId: page.id,
       }
@@ -159,12 +159,28 @@ export default function App() {
     updateActivePage((current) => ({ ...current, widgets: current.widgets.map((widget) => widget.id === selectedId ? { ...widget, ...patch } : widget) }))
   }, [selectedId, updateActivePage])
 
+  // One pointer gesture is one undo step: only the first geometry update of a drag records history.
+  const gestureRef = useRef(false)
+  useEffect(() => {
+    const endGesture = () => { gestureRef.current = false }
+    window.addEventListener('pointerup', endGesture)
+    window.addEventListener('pointercancel', endGesture)
+    return () => {
+      window.removeEventListener('pointerup', endGesture)
+      window.removeEventListener('pointercancel', endGesture)
+    }
+  }, [])
+
   const moveWidget = useCallback((id: string, x: number, y: number) => {
-    updateActivePage((current) => ({ ...current, widgets: current.widgets.map((widget) => widget.id === id ? { ...widget, x, y } : widget) }))
+    const recordHistory = !gestureRef.current
+    gestureRef.current = true
+    updateActivePage((current) => ({ ...current, widgets: current.widgets.map((widget) => widget.id === id ? { ...widget, x, y } : widget) }), recordHistory)
   }, [updateActivePage])
 
   const resizeWidget = useCallback((id: string, x: number, y: number, width: number, height: number) => {
-    updateActivePage((current) => ({ ...current, widgets: current.widgets.map((widget) => widget.id === id ? { ...widget, x, y, width, height } : widget) }))
+    const recordHistory = !gestureRef.current
+    gestureRef.current = true
+    updateActivePage((current) => ({ ...current, widgets: current.widgets.map((widget) => widget.id === id ? { ...widget, x, y, width, height } : widget) }), recordHistory)
   }, [updateActivePage])
 
   const switchPage = useCallback((id: string) => {
@@ -243,8 +259,18 @@ export default function App() {
       const modifier = event.ctrlKey || event.metaKey
       if (modifier && event.key.toLowerCase() === 's') {
         event.preventDefault()
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(project))
-        notify('Project saved locally')
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(project))
+          notify('Project saved locally')
+        } catch {
+          notify('Could not save: browser storage is unavailable')
+        }
+        return
+      }
+      if (modifier && event.key.toLowerCase() === 'p') {
+        event.preventDefault()
+        setPreview(!preview)
+        if (!preview) setSelectedId(null)
         return
       }
       if (modifier && event.key.toLowerCase() === 'z' && !editing) {
@@ -260,7 +286,8 @@ export default function App() {
         setSelectedId(null)
         setPreview(false)
       }
-      if (editing || !selectedId) return
+      // Locked widgets can be selected but not nudged, duplicated, or deleted from the keyboard.
+      if (editing || !selectedId || selected?.locked) return
       if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault()
         deleteWidget(selectedId)
@@ -279,7 +306,7 @@ export default function App() {
     }
     window.addEventListener('keydown', keydown)
     return () => window.removeEventListener('keydown', keydown)
-  }, [deleteWidget, duplicateWidget, notify, project, redo, selectedId, undo, updateActivePage])
+  }, [deleteWidget, duplicateWidget, notify, preview, project, redo, selected, selectedId, undo, updateActivePage])
 
   const setDeviceSize = (next: typeof device) => {
     setDevice(next)
